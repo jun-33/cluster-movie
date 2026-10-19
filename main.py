@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import math
@@ -95,6 +94,104 @@ except Exception as e:
     st.stop()
 
 st.caption(
+    f"전체 영화 {len(raw_df):,}편 · 분석에 사용한 영화 {len(valid_df):,}편"
+)
+
+if len(valid_df) < 3:
+    st.error("군집화를 하려면 분석 가능한 영화가 최소 3편 필요합니다.")
+    st.stop()
+
+
+# =========================================================
+# 속성 선택 및 K-평균 군집화
+# =========================================================
+st.subheader("1. 군집화에 사용할 속성")
+feature_names = list(FEATURES.keys())
+selected_features = st.multiselect(
+    "두 개 이상 선택하세요.",
+    options=feature_names,
+    default=feature_names,
+    help="스크린 수와 누적 관객은 상용로그로 변환해 군집화합니다."
+)
+
+if len(selected_features) < 2:
+    st.warning("군집화를 위해 속성을 두 개 이상 선택해 주세요.")
+    st.stop()
+
+selected_columns = [FEATURES[name] for name in selected_features]
+X = valid_df[selected_columns].astype(float)
+
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
+raw_clusters = kmeans.fit_predict(X_scaled)
+
+clustered = valid_df.copy()
+clustered["_cluster_raw"] = raw_clusters
+
+# 누적 관객 평균이 큰 군집부터 ㉮, ㉯, ㉰ 부여
+cluster_order = (
+    clustered.groupby("_cluster_raw")["total_audi"]
+    .mean()
+    .sort_values(ascending=False)
+    .index.tolist()
+)
+label_map = {cluster_id: CLUSTER_LABELS[i] for i, cluster_id in enumerate(cluster_order)}
+clustered["영화 유형"] = clustered["_cluster_raw"].map(label_map)
+
+st.success(
+    f"선택한 {len(selected_features)}개 속성으로 {len(clustered):,}편을 "
+    "세 유형으로 묶었습니다."
+)
+
+
+# =========================================================
+# 2차원 산점도
+# =========================================================
+st.subheader("2. 2차원 산점도")
+col_x, col_y = st.columns(2)
+with col_x:
+    x_feature = st.selectbox(
+        "가로축 속성",
+        options=selected_features,
+        index=0,
+        key="scatter2d_x"
+    )
+with col_y:
+    y_default = 1 if len(selected_features) > 1 else 0
+    y_feature = st.selectbox(
+        "세로축 속성",
+        options=selected_features,
+        index=y_default,
+        key="scatter2d_y"
+    )
+
+plot2d = clustered.copy()
+plot2d["_x"] = plot2d[FEATURES[x_feature]]
+plot2d["_y"] = plot2d[FEATURES[y_feature]]
+
+fig2d = px.scatter(
+    plot2d,
+    x="_x",
+    y="_y",
+    color="영화 유형",
+    hover_name="movieNm",
+    hover_data={
+        "_x": False,
+        "_y": False,
+        "영화 유형": True,
+        "genre": True,
+        "nation": True,
+    },
+    labels={"_x": x_feature, "_y": y_feature, "영화 유형": "영화 유형"},
+    title=f"{x_feature} × {y_feature}"
+)
+fig2d.update_traces(marker={"size": 8, "opacity": 0.8})
+fig2d.update_layout(legend_title_text="영화 유형", margin=dict(l=20, r=20, t=60, b=20))
+st.plotly_chart(fig2d, use_container_width=True)
+
+
 # =========================================================
 # 3차원 산점도
 # =========================================================
